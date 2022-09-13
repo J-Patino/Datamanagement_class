@@ -1,0 +1,64 @@
+CREATE TABLE movie_rentals ( rental_id INT, month_of_rental INT, inventory_id INT, film_id INT, title VARCHAR(50), category_id INT,
+category_name VARCHAR (30) );
+CREATE TABLE movie_rental_genre ( category_name VARCHAR (30),
+month_of_rental INT,
+movies_rented INT
+);
+
+
+INSERT INTO movie_rentals (rental_id, month_of_rental, inventory_id, film_id, title, category_id, category_name)
+SELECT rental_id, rental_month(rental_date), rental.inventory_id, film.film_id, title, category.category_id, category.name
+FROM rental
+LEFT JOIN inventory
+ON rental.inventory_id = inventory.inventory_id INNER JOIN film
+ON inventory.film_id = film.film_id
+INNER JOIN film_category
+ON film.film_id = film_category.film_id
+INNER JOIN category
+ON category.category_id = film_category.category_id
+ORDER BY rental_date;
+INSERT INTO movie_rental_genre (category_name, month_of_rental, movies_rented) SELECT category_name, month_of_rental, COUNT(rental_id)
+FROM movie_rentals
+INNER JOIN category ON category.category_id = movie_rentals.category_id Group BY movie_rentals.category_name, movie_rentals.month_of_rental
+
+CREATE OR REPLACE FUNCTION rental_month (rental_date timestamp) RETURNS INT
+LANGUAGE plpgsql
+AS $$
+DECLARE month_of_rental int;
+BEGIN
+SELECT EXTRACT (MONTH FROM rental_date) INTO month_of_rental; RETURN month_of_rental;
+END;
+$$
+
+CREATE OR REPLACE PROCEDURE reload_movie_rental_genre_data() LANGUAGE plpgsql
+AS
+$$
+BEGIN
+TRUNCATE movie_rentals; TRUNCATE movie_rental_genre;
+INSERT INTO movie_rentals (rental_id, month_of_rental, inventory_id, film_id, title, category_id, category_name)
+SELECT rental_id, rental_month(rental_date), rental.inventory_id, film.film_id, title, category.category_id, category.name
+FROM rental
+LEFT JOIN inventory
+ON rental.inventory_id = inventory.inventory_id INNER JOIN film
+ON inventory.film_id = film.film_id
+INNER JOIN film_category
+ON film.film_id = film_category.film_id
+INNER JOIN category
+ON category.category_id = film_category.category_id ORDER BY rental_date;
+INSERT INTO movie_rental_genre (category_name, month_of_rental, movies_rented) SELECT category_name, month_of_rental, COUNT(rental_id)
+FROM movie_rentals
+INNER JOIN category ON category.category_id = movie_rentals.category_id
+Group BY movie_rentals.category_name, movie_rentals.month_of_rental;
+END; $$
+
+CREATE OR REPLACE FUNCTION insert_trigger_function() RETURNS trigger
+LANGUAGE plpgsql
+AS
+$$ BEGIN
+CALL reload_movie_rental_genre_data();
+RETURN NEW; END;
+$$
+CREATE TRIGGER movie_rentals_inserted AFTER INSERT
+ON rental
+FOR EACH STATEMENT
+EXECUTE PROCEDURE insert_trigger_function();
